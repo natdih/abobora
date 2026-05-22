@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.vercel/
+server/data/*.db
+server/data/*.db-shm
+server/data/*.db-wal
+*.tsbuildinfo
