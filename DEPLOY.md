@@ -1,29 +1,58 @@
-# Deploy no Vercel
+# Rodar Localmente
 
-O projeto ja inclui `vercel.json` e uma entrada serverless em `api/index.js`.
+Para a festa, o caminho mais confiavel e rodar em um notebook local.
 
-Configuracoes esperadas no Vercel:
-
-- Framework Preset: Vite
-- Build Command: `npm run build`
-- Output Directory: `dist`
-- Node.js Version: 22.x ou superior
-
-Variaveis de ambiente obrigatorias:
-
-- `DATABASE_URL`: string de conexao do PostgreSQL.
-
-Deploy pela CLI:
+## Preparar
 
 ```bash
 npm install
-npx vercel
+npm run build
 ```
 
-Para publicar em producao:
+## Abrir o sistema
 
 ```bash
-npx vercel --prod
+npm start
 ```
 
-O banco pode ser Vercel Postgres, Neon, Supabase, Railway, Render ou qualquer outro PostgreSQL compativel. A aplicacao cria automaticamente as tabelas `competitions` e `bets` na primeira chamada da API.
+Depois acesse:
+
+```text
+http://localhost:3333
+```
+
+## Onde as apostas ficam salvas
+
+O banco SQLite local fica em:
+
+```text
+server/data/app.db
+```
+
+Enquanto o servidor estiver rodando nesse notebook, as apostas sao salvas nesse arquivo.
+
+## Backup durante a festa
+
+De tempos em tempos, feche o sistema por alguns segundos ou pare de cadastrar novas apostas e copie estes arquivos para um pendrive ou pasta de backup:
+
+```text
+server/data/app.db
+server/data/app.db-shm
+server/data/app.db-wal
+```
+
+O arquivo principal e `app.db`, mas copiar os tres arquivos e mais seguro quando o SQLite esta usando WAL.
+
+## Usar em outros celulares/computadores na mesma rede
+
+Se quiser abrir de outros dispositivos no mesmo Wi-Fi, descubra o IP do notebook e acesse:
+
+```text
+http://IP_DO_NOTEBOOK:3333
+```
+
+Exemplo:
+
+```text
+http://192.168.0.25:3333
+```
