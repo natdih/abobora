@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 34 84% 96%;
+  --foreground: 24 26% 14%;
+  --card: 0 0% 100%;
+  --card-foreground: 24 26% 14%;
+  --muted: 34 42% 89%;
+  --muted-foreground: 23 18% 40%;
+  --primary: 20 88% 48%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 143 35% 34%;
+  --destructive: 0 72% 51%;
+  --border: 27 42% 82%;
+}
+
+.dark {
+  --background: 25 24% 9%;
+  --foreground: 38 70% 93%;
+  --card: 24 22% 13%;
+  --card-foreground: 38 70% 93%;
+  --muted: 24 18% 20%;
+  --muted-foreground: 35 24% 72%;
+  --primary: 25 90% 56%;
+  --primary-foreground: 22 30% 10%;
+  --accent: 145 38% 48%;
+  --destructive: 0 68% 58%;
+  --border: 25 18% 25%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at top left, rgba(244, 126, 39, 0.18), transparent 32rem),
+    linear-gradient(135deg, hsl(var(--background)), hsl(var(--muted)));
+  color: hsl(var(--foreground));
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.confetti-piece {
+  position: fixed;
+  top: -12px;
+  z-index: 45;
+  height: 14px;
+  width: 8px;
+  border-radius: 2px;
+  animation: confetti-fall 2.2s ease-in forwards;
+}
+
+@keyframes confetti-fall {
+  to {
+    transform: translateY(105vh) rotate(680deg);
+    opacity: 0;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: white;
+  }
+}
