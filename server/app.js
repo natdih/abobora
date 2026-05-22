@@ -3,16 +3,34 @@ import cors from "cors";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+import pg from "pg";
+
+const { Pool } = pg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const isVercel = Boolean(process.env.VERCEL);
-const dataDir = isVercel ? path.join("/tmp", "sementes-da-abobora") : path.join(__dirname, "data");
-const dbPath = path.join(dataDir, "app.db");
+const databaseUrl = process.env.DATABASE_URL;
 
-fs.mkdirSync(dataDir, { recursive: true });
+const pool = databaseUrl
+  ? new Pool({
+      connectionString: databaseUrl,
+      ssl: shouldUseSsl(databaseUrl) ? { rejectUnauthorized: false } : false
+    })
+  : null;
+
+let databaseReady;
+
+const app = express();
+
+app.use(cors());
+app.use(express.json({ limit: "2mb" }));
+
+function shouldUseSsl(url) {
+  if (process.env.POSTGRES_SSL === "false") return false;
+  return !url.includes("localhost") && !url.includes("127.0.0.1");
+}
 
 function digitsOnly(value = "") {
   return String(value).replace(/\D/g, "");
@@ -22,63 +40,74 @@ function normalizeName(value = "") {
   return String(value).trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-const db = new DatabaseSync(dbPath);
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  PRAGMA foreign_keys = ON;
-
-  CREATE TABLE IF NOT EXISTS competitions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS bets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    competition_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    phone_digits TEXT NOT NULL,
-    guess INTEGER NOT NULL CHECK (guess > 0),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (competition_id) REFERENCES competitions(id) ON DELETE CASCADE
-  );
-`);
-
-const getCompetitionCount = db.prepare("SELECT COUNT(*) AS total FROM competitions");
-const getBetCount = db.prepare("SELECT COUNT(*) AS total FROM bets");
-const insertCompetition = db.prepare("INSERT INTO competitions (name) VALUES (?)");
-const insertBet = db.prepare(`
-  INSERT INTO bets (competition_id, name, phone, phone_digits, guess, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-`);
-
-if (getCompetitionCount.get().total === 0) {
-  insertCompetition.run("Abobora 2026");
+async function query(text, params) {
+  const client = await getDatabase();
+  return client.query(text, params);
 }
 
-const defaultCompetition = db.prepare("SELECT id FROM competitions ORDER BY id LIMIT 1").get();
+async function getDatabase() {
+  if (!pool) {
+    throw new Error("DATABASE_URL nao foi configurada.");
+  }
 
-if (getBetCount.get().total === 0 && defaultCompetition) {
-  [
-    ["Maria Aparecida", "(11) 98888-1001", 523],
-    ["Joao Batista", "(11) 97777-2002", 610],
-    ["Joao Batista", "(11) 97777-2002", 777],
-    ["Ana Clara", "(11) 96666-3003", 498],
-    ["Pedro Henrique", "(11) 95555-4004", 650],
-    ["Dona Lourdes", "(11) 94444-5005", 555],
-    ["Carlos Eduardo", "(11) 93333-6006", 701],
-    ["Fernanda Lima", "(11) 92222-7007", 590]
-  ].forEach(([name, phone, guess]) => {
-    insertBet.run(defaultCompetition.id, name, phone, digitsOnly(phone), guess);
-  });
+  databaseReady ??= initializeDatabase();
+  await databaseReady;
+  return pool;
 }
 
-const app = express();
+async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS competitions (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+    CREATE TABLE IF NOT EXISTS bets (
+      id SERIAL PRIMARY KEY,
+      competition_id INTEGER NOT NULL REFERENCES competitions(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      phone_digits TEXT NOT NULL,
+      guess INTEGER NOT NULL CHECK (guess > 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  const competitionCount = await pool.query("SELECT COUNT(*)::int AS total FROM competitions");
+
+  if (competitionCount.rows[0].total === 0) {
+    await pool.query("INSERT INTO competitions (name) VALUES ($1)", ["Abobora 2026"]);
+  }
+
+  const betCount = await pool.query("SELECT COUNT(*)::int AS total FROM bets");
+  const defaultCompetition = await pool.query("SELECT id FROM competitions ORDER BY id LIMIT 1");
+  const defaultCompetitionId = defaultCompetition.rows[0]?.id;
+
+  if (betCount.rows[0].total === 0 && defaultCompetitionId) {
+    const seedBets = [
+      ["Maria Aparecida", "(11) 98888-1001", 523],
+      ["Joao Batista", "(11) 97777-2002", 610],
+      ["Joao Batista", "(11) 97777-2002", 777],
+      ["Ana Clara", "(11) 96666-3003", 498],
+      ["Pedro Henrique", "(11) 95555-4004", 650],
+      ["Dona Lourdes", "(11) 94444-5005", 555],
+      ["Carlos Eduardo", "(11) 93333-6006", 701],
+      ["Fernanda Lima", "(11) 92222-7007", 590]
+    ];
+
+    for (const [name, phone, guess] of seedBets) {
+      await pool.query(
+        `
+          INSERT INTO bets (competition_id, name, phone, phone_digits, guess)
+          VALUES ($1, $2, $3, $4, $5)
+        `,
+        [defaultCompetitionId, name, phone, digitsOnly(phone), guess]
+      );
+    }
+  }
+}
 
 function validateBet(body) {
   const name = String(body.name ?? "").trim().replace(/\s+/g, " ");
@@ -93,20 +122,26 @@ function validateBet(body) {
   return { value: { name, phone, phoneDigits, guess } };
 }
 
-function findDuplicate({ competitionId, name, phoneDigits, guess, ignoreId }) {
-  const sql = `
-    SELECT id FROM bets
-    WHERE competition_id = ?
-      AND lower(trim(name)) = ?
-      AND phone_digits = ?
-      AND guess = ?
-      ${ignoreId ? "AND id != ?" : ""}
-    LIMIT 1
-  `;
-  const params = ignoreId
-    ? [competitionId, normalizeName(name), phoneDigits, guess, ignoreId]
-    : [competitionId, normalizeName(name), phoneDigits, guess];
-  return db.prepare(sql).get(...params);
+async function findDuplicate({ competitionId, name, phoneDigits, guess, ignoreId }) {
+  const params = [competitionId, normalizeName(name), phoneDigits, guess];
+  const ignoreClause = ignoreId ? "AND id != $5" : "";
+
+  if (ignoreId) params.push(ignoreId);
+
+  const result = await query(
+    `
+      SELECT id FROM bets
+      WHERE competition_id = $1
+        AND lower(trim(name)) = $2
+        AND phone_digits = $3
+        AND guess = $4
+        ${ignoreClause}
+      LIMIT 1
+    `,
+    params
+  );
+
+  return result.rows[0];
 }
 
 function serializeBet(row) {
@@ -122,102 +157,144 @@ function serializeBet(row) {
   };
 }
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
-});
+function asyncRoute(handler) {
+  return (req, res, next) => {
+    Promise.resolve(handler(req, res, next)).catch(next);
+  };
+}
 
-app.get("/api/competitions", (_req, res) => {
-  const rows = db.prepare("SELECT id, name, created_at AS createdAt FROM competitions ORDER BY id DESC").all();
-  res.json(rows);
-});
+app.get("/api/health", asyncRoute(async (_req, res) => {
+  if (!databaseUrl) {
+    return res.status(500).json({ ok: false, message: "DATABASE_URL nao foi configurada." });
+  }
 
-app.post("/api/competitions", (req, res) => {
+  await query("SELECT 1");
+  res.json({ ok: true, database: "postgres" });
+}));
+
+app.get("/api/competitions", asyncRoute(async (_req, res) => {
+  const result = await query('SELECT id, name, created_at AS "createdAt" FROM competitions ORDER BY id DESC');
+  res.json(result.rows);
+}));
+
+app.post("/api/competitions", asyncRoute(async (req, res) => {
   const name = String(req.body.name ?? "").trim();
   if (!name) return res.status(400).json({ message: "Informe o nome da competicao." });
 
   try {
-    const result = insertCompetition.run(name);
-    const row = db.prepare("SELECT id, name, created_at AS createdAt FROM competitions WHERE id = ?").get(result.lastInsertRowid);
-    res.status(201).json(row);
-  } catch {
-    res.status(409).json({ message: "Ja existe uma competicao com esse nome." });
+    const result = await query(
+      'INSERT INTO competitions (name) VALUES ($1) RETURNING id, name, created_at AS "createdAt"',
+      [name]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === "23505") {
+      return res.status(409).json({ message: "Ja existe uma competicao com esse nome." });
+    }
+
+    throw error;
   }
-});
+}));
 
-app.get("/api/competitions/:competitionId/bets", (req, res) => {
+app.get("/api/competitions/:competitionId/bets", asyncRoute(async (req, res) => {
   const competitionId = Number(req.params.competitionId);
-  const rows = db.prepare("SELECT * FROM bets WHERE competition_id = ? ORDER BY created_at DESC, id DESC").all(competitionId);
-  res.json(rows.map(serializeBet));
-});
+  const result = await query(
+    "SELECT * FROM bets WHERE competition_id = $1 ORDER BY created_at DESC, id DESC",
+    [competitionId]
+  );
+  res.json(result.rows.map(serializeBet));
+}));
 
-app.post("/api/competitions/:competitionId/bets", (req, res) => {
+app.post("/api/competitions/:competitionId/bets", asyncRoute(async (req, res) => {
   const competitionId = Number(req.params.competitionId);
   const validation = validateBet(req.body);
   if (validation.error) return res.status(400).json({ message: validation.error });
 
   const bet = validation.value;
-  if (findDuplicate({ competitionId, ...bet })) {
+  if (await findDuplicate({ competitionId, ...bet })) {
     return res.status(409).json({ message: "Esse participante ja registrou esse palpite." });
   }
 
-  const result = insertBet.run(competitionId, bet.name, bet.phone, bet.phoneDigits, bet.guess);
-  const row = db.prepare("SELECT * FROM bets WHERE id = ?").get(result.lastInsertRowid);
-  res.status(201).json(serializeBet(row));
-});
+  const result = await query(
+    `
+      INSERT INTO bets (competition_id, name, phone, phone_digits, guess)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `,
+    [competitionId, bet.name, bet.phone, bet.phoneDigits, bet.guess]
+  );
 
-app.post("/api/competitions/:competitionId/bets/import", (req, res) => {
+  res.status(201).json(serializeBet(result.rows[0]));
+}));
+
+app.post("/api/competitions/:competitionId/bets/import", asyncRoute(async (req, res) => {
   const competitionId = Number(req.params.competitionId);
   const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
   const imported = [];
   const errors = [];
 
-  rows.forEach((row, index) => {
+  for (const [index, row] of rows.entries()) {
     const validation = validateBet(row);
     if (validation.error) {
       errors.push({ line: index + 2, message: validation.error });
-      return;
+      continue;
     }
 
     const bet = validation.value;
-    if (findDuplicate({ competitionId, ...bet })) {
+    if (await findDuplicate({ competitionId, ...bet })) {
       errors.push({ line: index + 2, message: "Duplicado: participante ja registrou esse palpite." });
-      return;
+      continue;
     }
 
-    const result = insertBet.run(competitionId, bet.name, bet.phone, bet.phoneDigits, bet.guess);
-    imported.push(result.lastInsertRowid);
-  });
+    const result = await query(
+      `
+        INSERT INTO bets (competition_id, name, phone, phone_digits, guess)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+      `,
+      [competitionId, bet.name, bet.phone, bet.phoneDigits, bet.guess]
+    );
+    imported.push(result.rows[0].id);
+  }
 
   res.json({ imported: imported.length, errors });
-});
+}));
 
-app.put("/api/bets/:id", (req, res) => {
+app.put("/api/bets/:id", asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
-  const current = db.prepare("SELECT * FROM bets WHERE id = ?").get(id);
-  if (!current) return res.status(404).json({ message: "Aposta nao encontrada." });
+  const current = await query("SELECT * FROM bets WHERE id = $1", [id]);
+  if (!current.rows[0]) return res.status(404).json({ message: "Aposta nao encontrada." });
 
   const validation = validateBet(req.body);
   if (validation.error) return res.status(400).json({ message: validation.error });
 
   const bet = validation.value;
-  if (findDuplicate({ competitionId: current.competition_id, ...bet, ignoreId: id })) {
+  if (await findDuplicate({ competitionId: current.rows[0].competition_id, ...bet, ignoreId: id })) {
     return res.status(409).json({ message: "Esse participante ja registrou esse palpite." });
   }
 
-  db.prepare(`
-    UPDATE bets
-    SET name = ?, phone = ?, phone_digits = ?, guess = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(bet.name, bet.phone, bet.phoneDigits, bet.guess, id);
+  const result = await query(
+    `
+      UPDATE bets
+      SET name = $1, phone = $2, phone_digits = $3, guess = $4, updated_at = now()
+      WHERE id = $5
+      RETURNING *
+    `,
+    [bet.name, bet.phone, bet.phoneDigits, bet.guess, id]
+  );
 
-  const row = db.prepare("SELECT * FROM bets WHERE id = ?").get(id);
-  res.json(serializeBet(row));
-});
+  res.json(serializeBet(result.rows[0]));
+}));
 
-app.delete("/api/bets/:id", (req, res) => {
+app.delete("/api/bets/:id", asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
-  db.prepare("DELETE FROM bets WHERE id = ?").run(id);
+  await query("DELETE FROM bets WHERE id = $1", [id]);
   res.status(204).end();
+}));
+
+app.use((error, _req, res, _next) => {
+  console.error(error);
+  res.status(500).json({ message: error.message || "Nao foi possivel concluir a operacao." });
 });
 
 const distDir = path.join(rootDir, "dist");

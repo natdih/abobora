@@ -9,6 +9,10 @@ Configuracoes esperadas no Vercel:
 - Output Directory: `dist`
 - Node.js Version: 22.x ou superior
 
+Variaveis de ambiente obrigatorias:
+
+- `DATABASE_URL`: string de conexao do PostgreSQL.
+
 Deploy pela CLI:
 
 ```bash
@@ -22,4 +26,4 @@ Para publicar em producao:
 npx vercel --prod
 ```
 
-Observacao: no Vercel, o SQLite roda em `/tmp`, que e um armazenamento temporario de Serverless Function. Isso deixa o deploy funcionando para demonstracao/testes, mas nao deve ser usado como banco permanente em producao. Para dados persistentes, use um banco externo, como Vercel Postgres, Neon, Supabase ou Turso.
+O banco pode ser Vercel Postgres, Neon, Supabase, Railway, Render ou qualquer outro PostgreSQL compativel. A aplicacao cria automaticamente as tabelas `competitions` e `bets` na primeira chamada da API.
