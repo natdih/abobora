@@ -60,6 +60,17 @@ server/data/app.db
 
 Na primeira execução, o sistema cria a competição "Abóbora 2026" e alguns dados mock para teste.
 
+## Google Planilhas
+
+Para hospedar na Vercel e usar o Google Planilhas como banco central, configure o Apps Script e defina:
+
+```text
+GOOGLE_SHEETS_WEBHOOK_URL
+GOOGLE_SHEETS_WEBHOOK_SECRET
+```
+
+O passo a passo e o script pronto estao em [GOOGLE_SHEETS.md](./GOOGLE_SHEETS.md). No uso local com `npm start`, o SQLite continua disponivel e tambem pode enviar copia para a planilha.
+
 ## Atalhos de atendimento
 
 - `Enter`: salva a aposta quando estiver no campo de palpite e limpa o cadastro

@@ -10,6 +10,8 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 const dataDir = path.join(__dirname, "data");
 const dbPath = path.join(dataDir, "app.db");
+const googleSheetsWebhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL;
+const googleSheetsWebhookSecret = process.env.GOOGLE_SHEETS_WEBHOOK_SECRET;
 
 fs.mkdirSync(dataDir, { recursive: true });
 
@@ -112,6 +114,7 @@ function serializeBet(row) {
   return {
     id: row.id,
     competitionId: row.competition_id,
+    competitionName: row.competition_name,
     name: row.name,
     phone: row.phone,
     phoneDigits: row.phone_digits,
@@ -119,6 +122,33 @@ function serializeBet(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+function getBetWithCompetition(id) {
+  return db.prepare(`
+    SELECT bets.*, competitions.name AS competition_name
+    FROM bets
+    JOIN competitions ON competitions.id = bets.competition_id
+    WHERE bets.id = ?
+  `).get(id);
+}
+
+function syncBetToGoogleSheets(action, row) {
+  if (!googleSheetsWebhookUrl || !row) return;
+
+  const payload = {
+    secret: googleSheetsWebhookSecret,
+    action,
+    bet: serializeBet(row)
+  };
+
+  fetch(googleSheetsWebhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }).catch((error) => {
+    console.error("Falha ao sincronizar aposta com Google Planilhas:", error.message);
+  });
 }
 
 app.get("/api/health", (_req, res) => {
@@ -160,7 +190,8 @@ app.post("/api/competitions/:competitionId/bets", (req, res) => {
   }
 
   const result = insertBet.run(competitionId, bet.name, bet.phone, bet.phoneDigits, bet.guess);
-  const row = db.prepare("SELECT * FROM bets WHERE id = ?").get(result.lastInsertRowid);
+  const row = getBetWithCompetition(result.lastInsertRowid);
+  syncBetToGoogleSheets("created", row);
   res.status(201).json(serializeBet(row));
 });
 
@@ -185,6 +216,7 @@ app.post("/api/competitions/:competitionId/bets/import", (req, res) => {
 
     const result = insertBet.run(competitionId, bet.name, bet.phone, bet.phoneDigits, bet.guess);
     imported.push(result.lastInsertRowid);
+    syncBetToGoogleSheets("imported", getBetWithCompetition(result.lastInsertRowid));
   });
 
   res.json({ imported: imported.length, errors });
@@ -209,13 +241,16 @@ app.put("/api/bets/:id", (req, res) => {
     WHERE id = ?
   `).run(bet.name, bet.phone, bet.phoneDigits, bet.guess, id);
 
-  const row = db.prepare("SELECT * FROM bets WHERE id = ?").get(id);
+  const row = getBetWithCompetition(id);
+  syncBetToGoogleSheets("updated", row);
   res.json(serializeBet(row));
 });
 
 app.delete("/api/bets/:id", (req, res) => {
   const id = Number(req.params.id);
+  const row = getBetWithCompetition(id);
   db.prepare("DELETE FROM bets WHERE id = ?").run(id);
+  syncBetToGoogleSheets("deleted", row);
   res.status(204).end();
 });
 
