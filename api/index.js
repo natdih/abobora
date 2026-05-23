@@ -48,6 +48,22 @@ function handleError(error, res) {
   res.status(error.statusCode || 500).json({ message: error.message || "Erro inesperado." });
 }
 
+function requireArray(value, message) {
+  if (Array.isArray(value)) return value;
+
+  const error = new Error(message);
+  error.statusCode = 502;
+  throw error;
+}
+
+function requireObject(value, message) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+
+  const error = new Error(message);
+  error.statusCode = 502;
+  throw error;
+}
+
 app.get("/api/health", async (_req, res) => {
   try {
     await callSheets("health");
@@ -60,7 +76,7 @@ app.get("/api/health", async (_req, res) => {
 app.get("/api/competitions", async (_req, res) => {
   try {
     const body = await callSheets("listCompetitions");
-    res.json(Array.isArray(body.competitions) ? body.competitions : []);
+    res.json(requireArray(body.competitions, "O Apps Script publicado ainda nao tem listCompetitions. Publique uma nova versao com o codigo de GOOGLE_SHEETS.md."));
   } catch (error) {
     handleError(error, res);
   }
@@ -69,7 +85,7 @@ app.get("/api/competitions", async (_req, res) => {
 app.post("/api/competitions", async (req, res) => {
   try {
     const body = await callSheets("createCompetition", { name: req.body.name });
-    res.status(201).json(body.competition);
+    res.status(201).json(requireObject(body.competition, "O Apps Script publicado ainda nao tem createCompetition."));
   } catch (error) {
     handleError(error, res);
   }
@@ -78,7 +94,7 @@ app.post("/api/competitions", async (req, res) => {
 app.get("/api/competitions/:competitionId/bets", async (req, res) => {
   try {
     const body = await callSheets("listBets", { competitionId: Number(req.params.competitionId) });
-    res.json(Array.isArray(body.bets) ? body.bets : []);
+    res.json(requireArray(body.bets, "O Apps Script publicado ainda nao tem listBets. Publique uma nova versao com o codigo de GOOGLE_SHEETS.md."));
   } catch (error) {
     handleError(error, res);
   }
@@ -90,7 +106,7 @@ app.post("/api/competitions/:competitionId/bets", async (req, res) => {
       competitionId: Number(req.params.competitionId),
       bet: req.body
     });
-    res.status(201).json(body.bet);
+    res.status(201).json(requireObject(body.bet, "O Apps Script publicado ainda nao tem createBet. Publique uma nova versao com o codigo de GOOGLE_SHEETS.md."));
   } catch (error) {
     handleError(error, res);
   }
@@ -102,7 +118,10 @@ app.post("/api/competitions/:competitionId/bets/import", async (req, res) => {
       competitionId: Number(req.params.competitionId),
       rows: Array.isArray(req.body.rows) ? req.body.rows : []
     });
-    res.json({ imported: body.imported, errors: body.errors });
+    res.json({
+      imported: Number(body.imported || 0),
+      errors: requireArray(body.errors, "O Apps Script publicado ainda nao tem importBets.")
+    });
   } catch (error) {
     handleError(error, res);
   }
@@ -111,7 +130,7 @@ app.post("/api/competitions/:competitionId/bets/import", async (req, res) => {
 app.put("/api/bets/:id", async (req, res) => {
   try {
     const body = await callSheets("updateBet", { id: Number(req.params.id), bet: req.body });
-    res.json(body.bet);
+    res.json(requireObject(body.bet, "O Apps Script publicado ainda nao tem updateBet."));
   } catch (error) {
     handleError(error, res);
   }
