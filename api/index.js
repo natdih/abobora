@@ -19,7 +19,22 @@ async function callSheets(action, payload = {}) {
     body: JSON.stringify({ secret: sheetsSecret, action, ...payload })
   });
 
-  const body = await response.json().catch(() => ({}));
+  const text = await response.text();
+  if (!text.trim()) {
+    const error = new Error("O Apps Script respondeu vazio. Publique uma nova versao do script e confira a URL /exec.");
+    error.statusCode = 502;
+    throw error;
+  }
+
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    const error = new Error("O Apps Script nao retornou JSON valido. Confira se a URL publicada e do App da Web.");
+    error.statusCode = 502;
+    throw error;
+  }
+
   if (!response.ok || body.ok === false) {
     const error = new Error(body.message || "Nao foi possivel acessar o Google Planilhas.");
     error.statusCode = body.statusCode || response.status || 500;
@@ -45,7 +60,7 @@ app.get("/api/health", async (_req, res) => {
 app.get("/api/competitions", async (_req, res) => {
   try {
     const body = await callSheets("listCompetitions");
-    res.json(body.competitions);
+    res.json(Array.isArray(body.competitions) ? body.competitions : []);
   } catch (error) {
     handleError(error, res);
   }
@@ -63,7 +78,7 @@ app.post("/api/competitions", async (req, res) => {
 app.get("/api/competitions/:competitionId/bets", async (req, res) => {
   try {
     const body = await callSheets("listBets", { competitionId: Number(req.params.competitionId) });
-    res.json(body.bets);
+    res.json(Array.isArray(body.bets) ? body.bets : []);
   } catch (error) {
     handleError(error, res);
   }
