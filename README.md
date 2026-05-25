@@ -99,7 +99,7 @@ Exportação disponível em:
 Importação aceita planilha com colunas:
 
 - `Nome`
-- `Telefone`
+- `Telefone` (opcional)
 - `Palpite`
 
 Registros inválidos ou duplicados são informados ao final da importação.

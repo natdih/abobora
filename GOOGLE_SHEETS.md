@@ -321,7 +321,7 @@ function validateBet(body) {
   const guess = Number(body && body.guess);
 
   if (!name) throw httpError(400, "Informe o nome do participante.");
-  if (phoneDigits.length < 10 || phoneDigits.length > 11) throw httpError(400, "Informe um telefone brasileiro valido.");
+  if (phoneDigits && (phoneDigits.length < 10 || phoneDigits.length > 11)) throw httpError(400, "Informe um telefone brasileiro valido.");
   if (!Number.isInteger(guess) || guess <= 0) throw httpError(400, "O palpite deve ser um numero inteiro positivo.");
 
   return { name: name, phone: phone, phoneDigits: phoneDigits, guess: guess };
